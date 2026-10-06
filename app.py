@@ -42,6 +42,12 @@ MODEL = st.secrets.get(
     "gemini-3.8-flash"
 )
 
+FALLBACK_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash"
+]
+
 
 # ============================================================
 # GEMINI AI FUNCTION WITH AUTOMATIC RETRY
