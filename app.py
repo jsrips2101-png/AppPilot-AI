@@ -1,6 +1,9 @@
+```python
 import os
 import streamlit as st
 from google import genai
+from google.genai import types
+
 
 # =========================================================
 # PAGE CONFIG
@@ -12,76 +15,65 @@ st.set_page_config(
     layout="wide"
 )
 
+
 # =========================================================
 # GEMINI CONFIGURATION
 # =========================================================
 
-# First try Streamlit Secrets
+# Get API key from Streamlit Secrets first
 API_KEY = st.secrets.get("GEMINI_API_KEY")
 
-# If Streamlit Secrets is not available, try environment variable
+# If not found, try environment variable
 if not API_KEY:
     API_KEY = os.getenv("GEMINI_API_KEY")
 
+
+# Stop application if API key is missing
 if not API_KEY:
+
     st.error(
-        "Gemini API key is missing. "
+        "❌ Gemini API key is missing.\n\n"
         "Please add GEMINI_API_KEY in Streamlit Secrets."
     )
+
     st.stop()
 
 
 # Create Gemini client
-client = genai.Client(api_key=API_KEY)
-# =========================================================
-# CHECK AVAILABLE GEMINI MODELS
-# =========================================================
+client = genai.Client(
+    api_key=API_KEY
+)
 
-try:
-    available_models = []
 
-    for model in client.models.list():
-        if "generateContent" in str(model.supported_actions):
-            available_models.append(model.name)
-
-    st.sidebar.markdown("### 🔎 Available Gemini Models")
-
-    for model_name in available_models:
-        st.sidebar.write(model_name)
-
-except Exception as e:
-    st.sidebar.error(
-        f"Could not check available models: {str(e)}"
-    )
-
-# Gemini model
+# Current model
 MODEL = st.secrets.get(
     "GEMINI_MODEL",
-    os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+    "gemini-3.8-flash"
 )
 
 
 # =========================================================
 # GEMINI AI FUNCTION
+# ONE API CALL
 # =========================================================
 
-def generate_complete_analysis(app_idea):
+def generate_app_analysis(app_idea):
 
     prompt = f"""
-You are AppPilot AI, an expert AI-powered application
-development assistant.
+You are AppPilot AI, an expert AI-powered
+application development assistant.
 
 The user wants to build this application:
 
---------------------------------------------------
+==================================================
 {app_idea}
---------------------------------------------------
+==================================================
 
-Analyze the application and provide a complete beginner-friendly
-development guide.
+Your job is to help the user understand,
+plan, build, explain and learn the application.
 
-IMPORTANT:
-Return the answer using EXACTLY these five sections:
+Return the response using EXACTLY these
+five section headings:
 
 ## UNDERSTAND
 
@@ -94,23 +86,28 @@ Explain:
 - Important user requirements
 - Core features
 
+Use simple language.
+
 ## PLAN
 
-Explain:
+Create a practical development plan.
 
-- Main features
-- Screens/pages
-- User flow
-- Recommended frontend
-- Recommended backend
-- Database requirements
-- API requirements
-- AI components if useful
-- Basic architecture
-- Project folder structure
-- Development steps
+Include:
 
-Keep the recommendations practical for a student/fresher.
+1. Main features
+2. Screens/pages
+3. User flow
+4. Recommended frontend
+5. Recommended backend
+6. Database requirements
+7. API requirements
+8. AI components if useful
+9. Basic architecture
+10. Project folder structure
+11. Development steps
+
+Keep the recommendations suitable for
+a student or fresher.
 
 ## BUILD
 
@@ -123,18 +120,18 @@ Provide:
 1. Project structure
 2. requirements.txt
 3. Main app.py code
-4. Explanation of the generated code
+4. Explanation of the code
 
-The code should be beginner-friendly and runnable.
+The code must be beginner-friendly.
+
+Use proper Markdown code blocks.
 
 Do not use unnecessary complex libraries.
 
-IMPORTANT:
-Put code inside proper Markdown code blocks.
-
 ## EXPLAIN
 
-Explain the generated implementation in simple language.
+Explain the generated implementation
+in simple beginner-friendly language.
 
 Explain:
 
@@ -145,7 +142,7 @@ Explain:
 - APIs
 - Important functions
 - Data flow
-- How the user interacts with the application
+- User interaction
 
 ## LEARN
 
@@ -161,11 +158,15 @@ Include:
 6. Deployment
 7. What to learn next for production development
 
-Keep the explanation practical and easy to understand.
+Keep everything practical for a student/fresher.
 
-Do not invent requirements that are not related to the application idea.
+IMPORTANT:
 
-Use simple language suitable for a student or fresher.
+- Do not invent unrelated requirements.
+- Keep the answer practical.
+- Use simple English.
+- Make the generated code easy to understand.
+- Follow the five section headings exactly.
 """
 
 
@@ -173,92 +174,155 @@ Use simple language suitable for a student or fresher.
 
         response = client.models.generate_content(
             model=MODEL,
-            contents=prompt
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.7,
+                max_output_tokens=8000
+            )
         )
 
+        # Check response
         if response and response.text:
 
             return response.text
 
         return (
-            "⚠️ Gemini did not return any content. "
-            "Please try again."
+            "⚠️ Gemini returned an empty response."
         )
+
 
     except Exception as e:
 
         error_message = str(e)
 
-        if "503" in error_message or "UNAVAILABLE" in error_message:
+        # -------------------------------------------------
+        # 503 ERROR
+        # -------------------------------------------------
+
+        if (
+            "503" in error_message
+            or "UNAVAILABLE" in error_message
+        ):
 
             return (
-                "⚠️ Gemini is temporarily busy or unavailable.\n\n"
-                "Please wait for a few seconds and click "
-                "**Start Building** again."
+                "⚠️ **Gemini is temporarily unavailable.**\n\n"
+                "The Gemini model is currently experiencing "
+                "high demand.\n\n"
+                "Please wait a little and click "
+                "**Start Building** again.\n\n"
+                f"Model used: `{MODEL}`"
             )
 
-        elif "404" in error_message or "NOT_FOUND" in error_message:
+
+        # -------------------------------------------------
+        # 429 ERROR
+        # -------------------------------------------------
+
+        if (
+            "429" in error_message
+            or "RESOURCE_EXHAUSTED" in error_message
+        ):
 
             return (
-                "⚠️ The Gemini model is unavailable.\n\n"
-                f"Current model: `{MODEL}`\n\n"
-                "Please check your Gemini model configuration."
-            )
-
-        elif "401" in error_message or "UNAUTHENTICATED" in error_message:
-
-            return (
-                "⚠️ Gemini API authentication failed.\n\n"
-                "Please check your GEMINI_API_KEY."
-            )
-
-        elif "429" in error_message or "RESOURCE_EXHAUSTED" in error_message:
-
-            return (
-                "⚠️ Gemini API request limit was reached.\n\n"
+                "⚠️ **Gemini request limit reached.**\n\n"
                 "Please wait and try again later."
             )
 
-        else:
+
+        # -------------------------------------------------
+        # 404 ERROR
+        # -------------------------------------------------
+
+        if (
+            "404" in error_message
+            or "NOT_FOUND" in error_message
+        ):
 
             return (
-                "⚠️ AI Error:\n\n"
-                f"{error_message}"
+                "⚠️ **Gemini model not found.**\n\n"
+                f"Current model: `{MODEL}`\n\n"
+                "Please check the GEMINI_MODEL value "
+                "in Streamlit Secrets."
             )
 
 
+        # -------------------------------------------------
+        # 401 ERROR
+        # -------------------------------------------------
+
+        if (
+            "401" in error_message
+            or "UNAUTHENTICATED" in error_message
+        ):
+
+            return (
+                "⚠️ **Gemini authentication failed.**\n\n"
+                "Please check your GEMINI_API_KEY."
+            )
+
+
+        # -------------------------------------------------
+        # OTHER ERROR
+        # -------------------------------------------------
+
+        return (
+            "⚠️ **Gemini API Error**\n\n"
+            f"{error_message}"
+        )
+
+
 # =========================================================
-# EXTRACT SECTIONS FROM GEMINI RESPONSE
+# EXTRACT SECTION
 # =========================================================
 
-def extract_section(text, section_name, next_section=None):
+def extract_section(
+    full_text,
+    section_name,
+    next_section=None
+):
 
     start_marker = f"## {section_name}"
 
-    if start_marker not in text:
+    # Section does not exist
+    if start_marker not in full_text:
+
         return (
-            f"### {section_name}\n\n"
             "The AI did not generate this section."
         )
 
-    start = text.find(start_marker)
 
-    start = start + len(start_marker)
+    # Find beginning
+    start = full_text.find(
+        start_marker
+    )
 
+    start = start + len(
+        start_marker
+    )
+
+
+    # Find ending
     if next_section:
 
         next_marker = f"## {next_section}"
 
-        end = text.find(next_marker, start)
+        end = full_text.find(
+            next_marker,
+            start
+        )
 
         if end == -1:
-            end = len(text)
+            end = len(full_text)
 
     else:
 
-        end = len(text)
+        end = len(full_text)
 
-    section = text[start:end].strip()
+
+    section = full_text[
+        start:end
+    ].strip()
+
 
     return section
 
@@ -291,12 +355,13 @@ st.divider()
 
 
 # =========================================================
-# APP IDEA INPUT
+# STEP 1 — APP IDEA
 # =========================================================
 
 st.markdown(
     "### 💡 Step 1 — Enter Your App Idea"
 )
+
 
 app_idea = st.text_area(
     "What app do you want to build?",
@@ -312,44 +377,60 @@ app_idea = st.text_area(
 # QUICK EXAMPLES
 # =========================================================
 
-st.markdown("#### Try an example")
+st.markdown(
+    "#### Try an example"
+)
+
 
 col1, col2, col3 = st.columns(3)
 
 
+# Expense Tracker
 with col1:
 
-    if st.button("💰 Expense Tracker"):
+    if st.button(
+        "💰 Expense Tracker",
+        use_container_width=True
+    ):
 
         st.session_state["idea"] = (
-            "A student expense tracking app that allows "
-            "users to record expenses, categorize them "
-            "and view analytics."
+            "A student expense tracking app that "
+            "allows users to record expenses, "
+            "categorize expenses and view analytics."
         )
 
         st.rerun()
 
 
+# Study Planner
 with col2:
 
-    if st.button("📚 Study Planner"):
+    if st.button(
+        "📚 Study Planner",
+        use_container_width=True
+    ):
 
         st.session_state["idea"] = (
             "A study planner app that helps students "
             "create study schedules, track subjects "
-            "and monitor progress."
+            "and monitor study progress."
         )
 
         st.rerun()
 
 
+# Fitness App
 with col3:
 
-    if st.button("🏋️ Fitness App"):
+    if st.button(
+        "🏋️ Fitness App",
+        use_container_width=True
+    ):
 
         st.session_state["idea"] = (
-            "A fitness app that allows users to track "
-            "workouts, calories and daily fitness progress."
+            "A fitness application that allows users "
+            "to track workouts, calories and daily "
+            "fitness progress."
         )
 
         st.rerun()
@@ -359,7 +440,10 @@ with col3:
 # LOAD EXAMPLE IDEA
 # =========================================================
 
-if "idea" in st.session_state and not app_idea:
+if (
+    "idea" in st.session_state
+    and not app_idea
+):
 
     app_idea = st.session_state["idea"]
 
@@ -374,28 +458,35 @@ if st.button(
     use_container_width=True
 ):
 
+    # Check empty input
     if not app_idea.strip():
 
         st.warning(
-            "Please enter an app idea first."
+            "⚠️ Please enter an app idea first."
         )
+
 
     else:
 
-        # Remove previous result
+        # Clear old result
         st.session_state["ai_result"] = None
 
+
+        # Call Gemini ONCE
         with st.spinner(
             "🤖 AppPilot AI is analyzing your app idea..."
         ):
 
-            result = generate_complete_analysis(
+            result = generate_app_analysis(
                 app_idea
             )
 
-            st.session_state["ai_result"] = result
 
-        # Check whether AI returned an error
+        # Store result
+        st.session_state["ai_result"] = result
+
+
+        # Show success/error
         if result.startswith("⚠️"):
 
             st.error(
@@ -405,7 +496,7 @@ if st.button(
         else:
 
             st.success(
-                "Your app development plan is ready! 🎉"
+                "🎉 Your app development plan is ready!"
             )
 
 
@@ -417,22 +508,23 @@ if st.session_state["ai_result"]:
 
     result = st.session_state["ai_result"]
 
-    # -----------------------------------------------------
+
+    # =====================================================
     # ERROR RESULT
-    # -----------------------------------------------------
+    # =====================================================
 
     if result.startswith("⚠️"):
 
         st.error(result)
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # SUCCESS RESULT
-    # -----------------------------------------------------
+    # =====================================================
 
     else:
 
-        # Extract five sections
+        # Extract sections
         understand = extract_section(
             result,
             "UNDERSTAND",
@@ -463,6 +555,10 @@ if st.session_state["ai_result"]:
         )
 
 
+        # =================================================
+        # JOURNEY
+        # =================================================
+
         st.divider()
 
         st.markdown(
@@ -470,8 +566,8 @@ if st.session_state["ai_result"]:
         )
 
         st.info(
-            "💡 Prompt → Understand → Plan → Build → "
-            "Explain → Learn"
+            "💡 Prompt → Understand → Plan → "
+            "Build → Explain → Learn"
         )
 
 
@@ -491,7 +587,7 @@ if st.session_state["ai_result"]:
 
 
         # =================================================
-        # UNDERSTAND
+        # UNDERSTAND TAB
         # =================================================
 
         with tab1:
@@ -511,7 +607,7 @@ if st.session_state["ai_result"]:
 
 
         # =================================================
-        # PLAN
+        # PLAN TAB
         # =================================================
 
         with tab2:
@@ -531,7 +627,7 @@ if st.session_state["ai_result"]:
 
 
         # =================================================
-        # BUILD
+        # BUILD TAB
         # =================================================
 
         with tab3:
@@ -551,7 +647,7 @@ if st.session_state["ai_result"]:
 
 
         # =================================================
-        # EXPLAIN
+        # EXPLAIN TAB
         # =================================================
 
         with tab4:
@@ -561,8 +657,8 @@ if st.session_state["ai_result"]:
             )
 
             st.write(
-                "AI explains the application and generated "
-                "implementation in beginner-friendly language."
+                "AI explains the application and "
+                "generated implementation in simple language."
             )
 
             st.markdown(
@@ -571,7 +667,7 @@ if st.session_state["ai_result"]:
 
 
         # =================================================
-        # LEARN
+        # LEARN TAB
         # =================================================
 
         with tab5:
@@ -600,3 +696,51 @@ st.divider()
 st.caption(
     "AppPilot AI | AI-Powered App Development Assistant"
 )
+```
+
+### `requirements.txt`
+
+Use this as well:
+
+```text
+streamlit
+google-genai
+```
+
+The current Google documentation uses the `google-genai` package and the same `client.models.generate_content()` pattern used above.
+
+### Streamlit Cloud Secrets
+
+Go to:
+
+**Streamlit Cloud → Your App → Manage app → Settings → Secrets**
+
+Put:
+
+```toml
+GEMINI_API_KEY = "YOUR_ACTUAL_GEMINI_API_KEY"
+GEMINI_MODEL = "gemini-3.8-flash"
+```
+
+Do **not** put your actual key in `app.py` or GitHub.
+
+### Important
+
+This version makes **one Gemini request per "Start Building" click**:
+
+```text
+App idea
+   ↓
+Gemini
+   ↓
+ONE response
+   ↓
+Understand | Plan | Build | Explain | Learn
+   ↓
+5 Streamlit tabs
+```
+
+So it no longer makes five separate Gemini requests.
+
+If you still get **503 with this exact version**, then the problem is with the Gemini service/model availability for your API request, not the five-call design. Google currently documents `gemini-3.8-flash` with `client.models.generate_content()`, so the code pattern itself is valid.
+
