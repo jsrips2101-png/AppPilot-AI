@@ -16,205 +16,241 @@ st.set_page_config(
 # GEMINI CONFIGURATION
 # =========================================================
 
-API_KEY = os.getenv("GEMINI_API_KEY")
+# First try Streamlit Secrets
+API_KEY = st.secrets.get("GEMINI_API_KEY")
+
+# If Streamlit Secrets is not available, try environment variable
+if not API_KEY:
+    API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not API_KEY:
     st.error(
-        "Gemini API key is missing. Please add GEMINI_API_KEY "
-        "to your environment variables or Streamlit secrets."
+        "Gemini API key is missing. "
+        "Please add GEMINI_API_KEY in Streamlit Secrets."
     )
     st.stop()
 
+
+# Create Gemini client
 client = genai.Client(api_key=API_KEY)
 
-# IMPORTANT:
-# Updated Gemini model
-MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+
+# Gemini model
+MODEL = st.secrets.get(
+    "GEMINI_MODEL",
+    os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+)
 
 
 # =========================================================
-# AI FUNCTION
+# GEMINI AI FUNCTION
 # =========================================================
 
-def ask_ai(prompt):
-    try:
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=prompt
-        )
-
-        if response.text:
-            return response.text
-
-        return "AI did not return any content."
-
-    except Exception as e:
-        return f"AI Error: {str(e)}"
-
-
-# =========================================================
-# UNDERSTAND
-# =========================================================
-
-def understand_app(app_idea):
+def generate_complete_analysis(app_idea):
 
     prompt = f"""
-You are an expert AI App Development Assistant.
+You are AppPilot AI, an expert AI-powered application
+development assistant.
 
-Understand this application idea:
+The user wants to build this application:
 
+--------------------------------------------------
 {app_idea}
+--------------------------------------------------
 
-Give the answer in exactly this format:
+Analyze the application and provide a complete beginner-friendly
+development guide.
 
-### Application
-Explain what the application does.
+IMPORTANT:
+Return the answer using EXACTLY these five sections:
 
-### Target Users
-Explain who will use it.
+## UNDERSTAND
 
-### Problem
-Explain the problem it solves.
+Explain:
 
-### Main Goal
-Explain the main purpose of the application.
+- What the application does
+- Target users
+- Problem solved
+- Main goal
+- Important user requirements
+- Core features
 
-### User Requirements
-List the important requirements.
+## PLAN
 
-### Core Features
-List the most important features.
+Explain:
 
-Use simple language suitable for a student developer.
-"""
+- Main features
+- Screens/pages
+- User flow
+- Recommended frontend
+- Recommended backend
+- Database requirements
+- API requirements
+- AI components if useful
+- Basic architecture
+- Project folder structure
+- Development steps
 
-    return ask_ai(prompt)
+Keep the recommendations practical for a student/fresher.
 
+## BUILD
 
-# =========================================================
-# PLAN
-# =========================================================
-
-def plan_app(app_idea):
-
-    prompt = f"""
-You are an expert software architect.
-
-Create a practical development plan for this application:
-
-{app_idea}
-
-Include:
-
-1. Main Features
-2. Screens / Pages
-3. User Flow
-4. Recommended Frontend
-5. Recommended Backend
-6. Database
-7. APIs
-8. AI Components if useful
-9. Project Folder Structure
-10. Development Steps
-
-Keep the plan practical for a student or fresher.
-Use simple explanations.
-"""
-
-    return ask_ai(prompt)
-
-
-# =========================================================
-# BUILD
-# =========================================================
-
-def build_app(app_idea):
-
-    prompt = f"""
-You are an AI coding assistant.
-
-Application idea:
-
-{app_idea}
-
-Create a simple working prototype.
+Create a small but useful starter implementation.
 
 Use Python and Streamlit where possible.
 
 Provide:
 
-1. Project Structure
+1. Project structure
 2. requirements.txt
 3. Main app.py code
-4. Explanation of the code
+4. Explanation of the generated code
 
 The code should be beginner-friendly and runnable.
 
 Do not use unnecessary complex libraries.
 
-Make sure the generated code is complete and properly formatted.
-"""
+IMPORTANT:
+Put code inside proper Markdown code blocks.
 
-    return ask_ai(prompt)
+## EXPLAIN
 
-
-# =========================================================
-# EXPLAIN
-# =========================================================
-
-def explain_app(app_idea):
-
-    prompt = f"""
-Explain how a beginner can understand and develop this application:
-
-{app_idea}
+Explain the generated implementation in simple language.
 
 Explain:
 
-- Overall Architecture
+- Overall architecture
 - Frontend
 - Backend
 - Database
 - APIs
-- Important Functions
-- Data Flow
-- User Interaction
+- Important functions
+- Data flow
+- How the user interacts with the application
 
-Use simple language and small examples.
-"""
+## LEARN
 
-    return ask_ai(prompt)
-
-
-# =========================================================
-# LEARN
-# =========================================================
-
-def learn_app(app_idea):
-
-    prompt = f"""
-Create a beginner-friendly learning roadmap for developing:
-
-{app_idea}
-
-Create a step-by-step roadmap.
+Create a beginner-friendly learning roadmap.
 
 Include:
 
-1. Concepts to Learn
-2. Technologies to Learn
-3. Coding Topics
-4. Practice Tasks
+1. Concepts to learn
+2. Technologies to learn
+3. Python/coding topics
+4. Practice tasks
 5. Testing
 6. Deployment
+7. What to learn next for production development
 
-Also explain what the developer should learn next
-to turn the prototype into a complete production application.
+Keep the explanation practical and easy to understand.
 
-Keep it suitable for a student or fresher.
+Do not invent requirements that are not related to the application idea.
+
+Use simple language suitable for a student or fresher.
 """
 
-    return ask_ai(prompt)
+
+    try:
+
+        response = client.models.generate_content(
+            model=MODEL,
+            contents=prompt
+        )
+
+        if response and response.text:
+
+            return response.text
+
+        return (
+            "⚠️ Gemini did not return any content. "
+            "Please try again."
+        )
+
+    except Exception as e:
+
+        error_message = str(e)
+
+        if "503" in error_message or "UNAVAILABLE" in error_message:
+
+            return (
+                "⚠️ Gemini is temporarily busy or unavailable.\n\n"
+                "Please wait for a few seconds and click "
+                "**Start Building** again."
+            )
+
+        elif "404" in error_message or "NOT_FOUND" in error_message:
+
+            return (
+                "⚠️ The Gemini model is unavailable.\n\n"
+                f"Current model: `{MODEL}`\n\n"
+                "Please check your Gemini model configuration."
+            )
+
+        elif "401" in error_message or "UNAUTHENTICATED" in error_message:
+
+            return (
+                "⚠️ Gemini API authentication failed.\n\n"
+                "Please check your GEMINI_API_KEY."
+            )
+
+        elif "429" in error_message or "RESOURCE_EXHAUSTED" in error_message:
+
+            return (
+                "⚠️ Gemini API request limit was reached.\n\n"
+                "Please wait and try again later."
+            )
+
+        else:
+
+            return (
+                "⚠️ AI Error:\n\n"
+                f"{error_message}"
+            )
+
+
+# =========================================================
+# EXTRACT SECTIONS FROM GEMINI RESPONSE
+# =========================================================
+
+def extract_section(text, section_name, next_section=None):
+
+    start_marker = f"## {section_name}"
+
+    if start_marker not in text:
+        return (
+            f"### {section_name}\n\n"
+            "The AI did not generate this section."
+        )
+
+    start = text.find(start_marker)
+
+    start = start + len(start_marker)
+
+    if next_section:
+
+        next_marker = f"## {next_section}"
+
+        end = text.find(next_marker, start)
+
+        if end == -1:
+            end = len(text)
+
+    else:
+
+        end = len(text)
+
+    section = text[start:end].strip()
+
+    return section
+
+
+# =========================================================
+# SESSION STATE
+# =========================================================
+
+if "ai_result" not in st.session_state:
+
+    st.session_state["ai_result"] = None
 
 
 # =========================================================
@@ -223,7 +259,9 @@ Keep it suitable for a student or fresher.
 
 st.title("🚀 AppPilot AI")
 
-st.subheader("AI-Powered App Development Assistant")
+st.subheader(
+    "AI-Powered App Development Assistant"
+)
 
 st.write(
     "Turn your app idea into a development plan, "
@@ -237,7 +275,9 @@ st.divider()
 # APP IDEA INPUT
 # =========================================================
 
-st.markdown("### 💡 Step 1 — Enter Your App Idea")
+st.markdown(
+    "### 💡 Step 1 — Enter Your App Idea"
+)
 
 app_idea = st.text_area(
     "What app do you want to build?",
@@ -257,14 +297,18 @@ st.markdown("#### Try an example")
 
 col1, col2, col3 = st.columns(3)
 
+
 with col1:
 
     if st.button("💰 Expense Tracker"):
 
         st.session_state["idea"] = (
-            "A student expense tracking app that allows users "
-            "to record expenses, categorize them and view analytics."
+            "A student expense tracking app that allows "
+            "users to record expenses, categorize them "
+            "and view analytics."
         )
+
+        st.rerun()
 
 
 with col2:
@@ -272,9 +316,12 @@ with col2:
     if st.button("📚 Study Planner"):
 
         st.session_state["idea"] = (
-            "A study planner app that helps students create "
-            "study schedules, track subjects and monitor progress."
+            "A study planner app that helps students "
+            "create study schedules, track subjects "
+            "and monitor progress."
         )
+
+        st.rerun()
 
 
 with col3:
@@ -282,9 +329,11 @@ with col3:
     if st.button("🏋️ Fitness App"):
 
         st.session_state["idea"] = (
-            "A fitness app that allows users to track workouts, "
-            "calories and daily fitness progress."
+            "A fitness app that allows users to track "
+            "workouts, calories and daily fitness progress."
         )
+
+        st.rerun()
 
 
 # =========================================================
@@ -297,159 +346,230 @@ if "idea" in st.session_state and not app_idea:
 
 
 # =========================================================
-# GENERATE
+# START BUILDING
 # =========================================================
 
-if st.button("🚀 Start Building", type="primary"):
+if st.button(
+    "🚀 Start Building",
+    type="primary",
+    use_container_width=True
+):
 
     if not app_idea.strip():
 
-        st.warning("Please enter an app idea first.")
+        st.warning(
+            "Please enter an app idea first."
+        )
 
     else:
 
-        with st.spinner("AI is analyzing your app idea..."):
+        # Remove previous result
+        st.session_state["ai_result"] = None
 
-            st.session_state["understand"] = (
-                understand_app(app_idea)
+        with st.spinner(
+            "🤖 AppPilot AI is analyzing your app idea..."
+        ):
+
+            result = generate_complete_analysis(
+                app_idea
             )
 
-            st.session_state["plan"] = (
-                plan_app(app_idea)
+            st.session_state["ai_result"] = result
+
+        # Check whether AI returned an error
+        if result.startswith("⚠️"):
+
+            st.error(
+                "AppPilot AI could not complete the request."
             )
 
-            st.session_state["build"] = (
-                build_app(app_idea)
-            )
+        else:
 
-            st.session_state["explain"] = (
-                explain_app(app_idea)
+            st.success(
+                "Your app development plan is ready! 🎉"
             )
-
-            st.session_state["learn"] = (
-                learn_app(app_idea)
-            )
-
-        st.success(
-            "Your app development plan is ready! 🎉"
-        )
 
 
 # =========================================================
 # RESULTS
 # =========================================================
 
-if "understand" in st.session_state:
+if st.session_state["ai_result"]:
 
-    st.divider()
+    result = st.session_state["ai_result"]
 
-    st.markdown(
-        "## 🧭 Your AI Development Journey"
-    )
+    # -----------------------------------------------------
+    # ERROR RESULT
+    # -----------------------------------------------------
 
-    st.info(
-        "Prompt → Understand → Plan → Build → Explain → Learn"
-    )
+    if result.startswith("⚠️"):
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        [
-            "🧠 Understand",
-            "📋 Plan",
-            "💻 Build",
-            "🔍 Explain",
-            "🎓 Learn"
-        ]
-    )
+        st.error(result)
 
 
-    # =====================================================
-    # UNDERSTAND TAB
-    # =====================================================
+    # -----------------------------------------------------
+    # SUCCESS RESULT
+    # -----------------------------------------------------
 
-    with tab1:
+    else:
 
-        st.header("🧠 Understand")
-
-        st.write(
-            "AI first understands what you want to build "
-            "before generating code."
+        # Extract five sections
+        understand = extract_section(
+            result,
+            "UNDERSTAND",
+            "PLAN"
         )
+
+        plan = extract_section(
+            result,
+            "PLAN",
+            "BUILD"
+        )
+
+        build = extract_section(
+            result,
+            "BUILD",
+            "EXPLAIN"
+        )
+
+        explain = extract_section(
+            result,
+            "EXPLAIN",
+            "LEARN"
+        )
+
+        learn = extract_section(
+            result,
+            "LEARN"
+        )
+
+
+        st.divider()
 
         st.markdown(
-            st.session_state["understand"]
+            "## 🧭 Your AI Development Journey"
+        )
+
+        st.info(
+            "💡 Prompt → Understand → Plan → Build → "
+            "Explain → Learn"
         )
 
 
-    # =====================================================
-    # PLAN TAB
-    # =====================================================
+        # =================================================
+        # TABS
+        # =================================================
 
-    with tab2:
-
-        st.header("📋 Plan")
-
-        st.write(
-            "AI converts the idea into features, screens, "
-            "technology and development steps."
-        )
-
-        st.markdown(
-            st.session_state["plan"]
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(
+            [
+                "🧠 Understand",
+                "📋 Plan",
+                "💻 Build",
+                "🔍 Explain",
+                "🎓 Learn"
+            ]
         )
 
 
-    # =====================================================
-    # BUILD TAB
-    # =====================================================
+        # =================================================
+        # UNDERSTAND
+        # =================================================
 
-    with tab3:
+        with tab1:
 
-        st.header("💻 Build")
+            st.header(
+                "🧠 Understand"
+            )
 
-        st.write(
-            "AI generates a starter implementation that "
-            "developers can use as a starting point."
-        )
+            st.write(
+                "AI first understands what you want "
+                "to build before generating code."
+            )
 
-        st.markdown(
-            st.session_state["build"]
-        )
-
-
-    # =====================================================
-    # EXPLAIN TAB
-    # =====================================================
-
-    with tab4:
-
-        st.header("🔍 Explain")
-
-        st.write(
-            "AI explains the application and generated "
-            "implementation in beginner-friendly language."
-        )
-
-        st.markdown(
-            st.session_state["explain"]
-        )
+            st.markdown(
+                understand
+            )
 
 
-    # =====================================================
-    # LEARN TAB
-    # =====================================================
+        # =================================================
+        # PLAN
+        # =================================================
 
-    with tab5:
+        with tab2:
 
-        st.header("🎓 Learn")
+            st.header(
+                "📋 Plan"
+            )
 
-        st.write(
-            "AI creates a learning path so the user can "
-            "understand and continue developing the application."
-        )
+            st.write(
+                "AI converts the idea into features, "
+                "screens, technology and development steps."
+            )
 
-        st.markdown(
-            st.session_state["learn"]
-        )
+            st.markdown(
+                plan
+            )
+
+
+        # =================================================
+        # BUILD
+        # =================================================
+
+        with tab3:
+
+            st.header(
+                "💻 Build"
+            )
+
+            st.write(
+                "AI generates a starter implementation "
+                "that developers can use as a starting point."
+            )
+
+            st.markdown(
+                build
+            )
+
+
+        # =================================================
+        # EXPLAIN
+        # =================================================
+
+        with tab4:
+
+            st.header(
+                "🔍 Explain"
+            )
+
+            st.write(
+                "AI explains the application and generated "
+                "implementation in beginner-friendly language."
+            )
+
+            st.markdown(
+                explain
+            )
+
+
+        # =================================================
+        # LEARN
+        # =================================================
+
+        with tab5:
+
+            st.header(
+                "🎓 Learn"
+            )
+
+            st.write(
+                "AI creates a learning path so the user "
+                "can understand and continue developing "
+                "the application."
+            )
+
+            st.markdown(
+                learn
+            )
 
 
 # =========================================================
