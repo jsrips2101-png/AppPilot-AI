@@ -1,12 +1,13 @@
 import os
+import time
 import streamlit as st
 from google import genai
 from google.genai import types
 
 
-# =========================================================
-# PAGE CONFIG
-# =========================================================
+# ============================================================
+# PAGE CONFIGURATION
+# ============================================================
 
 st.set_page_config(
     page_title="AppPilot AI",
@@ -15,46 +16,36 @@ st.set_page_config(
 )
 
 
-# =========================================================
-# GEMINI CONFIGURATION
-# =========================================================
+# ============================================================
+# GEMINI API CONFIGURATION
+# ============================================================
 
-# Get API key from Streamlit Secrets first
 API_KEY = st.secrets.get("GEMINI_API_KEY")
 
-# If not found, try environment variable
 if not API_KEY:
     API_KEY = os.getenv("GEMINI_API_KEY")
 
 
-# Stop application if API key is missing
 if not API_KEY:
-
     st.error(
         "❌ Gemini API key is missing.\n\n"
         "Please add GEMINI_API_KEY in Streamlit Secrets."
     )
-
     st.stop()
 
 
-# Create Gemini client
-client = genai.Client(
-    api_key=API_KEY
-)
+client = genai.Client(api_key=API_KEY)
 
 
-# Current model
 MODEL = st.secrets.get(
     "GEMINI_MODEL",
     "gemini-3.8-flash"
 )
 
 
-# =========================================================
-# GEMINI AI FUNCTION
-# ONE API CALL
-# =========================================================
+# ============================================================
+# GEMINI AI FUNCTION WITH AUTOMATIC RETRY
+# ============================================================
 
 def generate_app_analysis(app_idea):
 
@@ -168,111 +159,153 @@ IMPORTANT:
 - Follow the five section headings exactly.
 """
 
+    # Maximum number of Gemini attempts
+    max_retries = 3
 
-    try:
+    for attempt in range(max_retries):
 
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.7,
-                max_output_tokens=8000
-            )
-        )
+        try:
 
-        # Check response
-        if response and response.text:
+            # ------------------------------------------------
+            # First attempt
+            # ------------------------------------------------
 
-            return response.text
+            if attempt == 0:
 
-        return (
-            "⚠️ Gemini returned an empty response."
-        )
+                message = (
+                    "🤖 AppPilot AI is analyzing "
+                    "your app idea..."
+                )
 
+            # ------------------------------------------------
+            # Retry attempts
+            # ------------------------------------------------
 
-    except Exception as e:
+            else:
 
-        error_message = str(e)
+                message = (
+                    f"🔄 Gemini is temporarily busy. "
+                    f"Retrying... ({attempt + 1}/{max_retries})"
+                )
 
-        # -------------------------------------------------
-        # 503 ERROR
-        # -------------------------------------------------
+            with st.spinner(message):
 
-        if (
-            "503" in error_message
-            or "UNAVAILABLE" in error_message
-        ):
+                response = client.models.generate_content(
+                    model=MODEL,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.7,
+                        max_output_tokens=8000
+                    )
+                )
 
-            return (
-                "⚠️ **Gemini is temporarily unavailable.**\n\n"
-                "The Gemini model is currently experiencing "
-                "high demand.\n\n"
-                "Please wait a little and click "
-                "**Start Building** again.\n\n"
-                f"Model used: `{MODEL}`"
-            )
+            # ------------------------------------------------
+            # Check Gemini response
+            # ------------------------------------------------
 
+            if response and response.text:
 
-        # -------------------------------------------------
-        # 429 ERROR
-        # -------------------------------------------------
-
-        if (
-            "429" in error_message
-            or "RESOURCE_EXHAUSTED" in error_message
-        ):
+                return response.text
 
             return (
-                "⚠️ **Gemini request limit reached.**\n\n"
-                "Please wait and try again later."
+                "⚠️ Gemini returned an empty response."
             )
 
+        except Exception as e:
 
-        # -------------------------------------------------
-        # 404 ERROR
-        # -------------------------------------------------
+            error_message = str(e)
 
-        if (
-            "404" in error_message
-            or "NOT_FOUND" in error_message
-        ):
+            # ------------------------------------------------
+            # Temporary Gemini errors
+            # ------------------------------------------------
+
+            temporary_error = (
+                "503" in error_message
+                or "UNAVAILABLE" in error_message
+                or "overloaded" in error_message.lower()
+                or "temporarily" in error_message.lower()
+            )
+
+            if temporary_error:
+
+                # If this is the last attempt
+                if attempt == max_retries - 1:
+
+                    return (
+                        "⚠️ **Gemini is temporarily unavailable.**\n\n"
+                        "I tried automatically several times, "
+                        "but Gemini is still experiencing "
+                        "high demand.\n\n"
+                        "Please wait a few minutes and "
+                        "try again.\n\n"
+                        f"Model used: `{MODEL}`"
+                    )
+
+                # Wait before next retry
+                wait_time = 3 * (attempt + 1)
+
+                time.sleep(wait_time)
+
+                continue
+
+            # ------------------------------------------------
+            # Rate limit error
+            # ------------------------------------------------
+
+            if (
+                "429" in error_message
+                or "RESOURCE_EXHAUSTED" in error_message
+            ):
+
+                return (
+                    "⚠️ **Gemini request limit reached.**\n\n"
+                    "Please wait for the request limit "
+                    "to reset and try again later."
+                )
+
+            # ------------------------------------------------
+            # Model not found
+            # ------------------------------------------------
+
+            if (
+                "404" in error_message
+                or "NOT_FOUND" in error_message
+            ):
+
+                return (
+                    "⚠️ **Gemini model not found.**\n\n"
+                    f"Current model: `{MODEL}`\n\n"
+                    "Please check the GEMINI_MODEL value "
+                    "in Streamlit Secrets."
+                )
+
+            # ------------------------------------------------
+            # Authentication error
+            # ------------------------------------------------
+
+            if (
+                "401" in error_message
+                or "UNAUTHENTICATED" in error_message
+            ):
+
+                return (
+                    "⚠️ **Gemini authentication failed.**\n\n"
+                    "Please check your GEMINI_API_KEY."
+                )
+
+            # ------------------------------------------------
+            # Other API errors
+            # ------------------------------------------------
 
             return (
-                "⚠️ **Gemini model not found.**\n\n"
-                f"Current model: `{MODEL}`\n\n"
-                "Please check the GEMINI_MODEL value "
-                "in Streamlit Secrets."
+                "⚠️ **Gemini API Error**\n\n"
+                f"{error_message}"
             )
 
 
-        # -------------------------------------------------
-        # 401 ERROR
-        # -------------------------------------------------
-
-        if (
-            "401" in error_message
-            or "UNAUTHENTICATED" in error_message
-        ):
-
-            return (
-                "⚠️ **Gemini authentication failed.**\n\n"
-                "Please check your GEMINI_API_KEY."
-            )
-
-
-        # -------------------------------------------------
-        # OTHER ERROR
-        # -------------------------------------------------
-
-        return (
-            "⚠️ **Gemini API Error**\n\n"
-            f"{error_message}"
-        )
-
-
-# =========================================================
-# EXTRACT SECTION
-# =========================================================
+# ============================================================
+# SECTION EXTRACTION
+# ============================================================
 
 def extract_section(
     full_text,
@@ -282,25 +315,16 @@ def extract_section(
 
     start_marker = f"## {section_name}"
 
-    # Section does not exist
     if start_marker not in full_text:
 
         return (
             "The AI did not generate this section."
         )
 
+    start = full_text.find(start_marker)
 
-    # Find beginning
-    start = full_text.find(
-        start_marker
-    )
+    start = start + len(start_marker)
 
-    start = start + len(
-        start_marker
-    )
-
-
-    # Find ending
     if next_section:
 
         next_marker = f"## {next_section}"
@@ -311,33 +335,28 @@ def extract_section(
         )
 
         if end == -1:
+
             end = len(full_text)
 
     else:
 
         end = len(full_text)
 
-
-    section = full_text[
-        start:end
-    ].strip()
+    return full_text[start:end].strip()
 
 
-    return section
-
-
-# =========================================================
+# ============================================================
 # SESSION STATE
-# =========================================================
+# ============================================================
 
 if "ai_result" not in st.session_state:
 
     st.session_state["ai_result"] = None
 
 
-# =========================================================
+# ============================================================
 # HEADER
-# =========================================================
+# ============================================================
 
 st.title("🚀 AppPilot AI")
 
@@ -353,9 +372,9 @@ st.write(
 st.divider()
 
 
-# =========================================================
+# ============================================================
 # STEP 1 — APP IDEA
-# =========================================================
+# ============================================================
 
 st.markdown(
     "### 💡 Step 1 — Enter Your App Idea"
@@ -364,17 +383,19 @@ st.markdown(
 
 app_idea = st.text_area(
     "What app do you want to build?",
+
     placeholder=(
         "Example: Build a mobile app for students "
         "to track their daily expenses."
     ),
+
     height=120
 )
 
 
-# =========================================================
-# QUICK EXAMPLES
-# =========================================================
+# ============================================================
+# EXAMPLE IDEAS
+# ============================================================
 
 st.markdown(
     "#### Try an example"
@@ -384,7 +405,10 @@ st.markdown(
 col1, col2, col3 = st.columns(3)
 
 
+# ------------------------------------------------------------
 # Expense Tracker
+# ------------------------------------------------------------
+
 with col1:
 
     if st.button(
@@ -401,7 +425,10 @@ with col1:
         st.rerun()
 
 
+# ------------------------------------------------------------
 # Study Planner
+# ------------------------------------------------------------
+
 with col2:
 
     if st.button(
@@ -418,7 +445,10 @@ with col2:
         st.rerun()
 
 
+# ------------------------------------------------------------
 # Fitness App
+# ------------------------------------------------------------
+
 with col3:
 
     if st.button(
@@ -435,9 +465,9 @@ with col3:
         st.rerun()
 
 
-# =========================================================
+# ============================================================
 # LOAD EXAMPLE IDEA
-# =========================================================
+# ============================================================
 
 if (
     "idea" in st.session_state
@@ -447,9 +477,9 @@ if (
     app_idea = st.session_state["idea"]
 
 
-# =========================================================
-# START BUILDING
-# =========================================================
+# ============================================================
+# START BUILDING BUTTON
+# ============================================================
 
 if st.button(
     "🚀 Start Building",
@@ -457,39 +487,27 @@ if st.button(
     use_container_width=True
 ):
 
-    # Check empty input
     if not app_idea.strip():
 
         st.warning(
             "⚠️ Please enter an app idea first."
         )
 
-
     else:
 
-        # Clear old result
         st.session_state["ai_result"] = None
 
+        result = generate_app_analysis(
+            app_idea
+        )
 
-        # Call Gemini ONCE
-        with st.spinner(
-            "🤖 AppPilot AI is analyzing your app idea..."
-        ):
-
-            result = generate_app_analysis(
-                app_idea
-            )
-
-
-        # Store result
         st.session_state["ai_result"] = result
 
-
-        # Show success/error
         if result.startswith("⚠️"):
 
             st.error(
-                "AppPilot AI could not complete the request."
+                "AppPilot AI could not complete "
+                "the request."
             )
 
         else:
@@ -499,31 +517,30 @@ if st.button(
             )
 
 
-# =========================================================
-# RESULTS
-# =========================================================
+# ============================================================
+# DISPLAY AI RESULT
+# ============================================================
 
 if st.session_state["ai_result"]:
 
     result = st.session_state["ai_result"]
 
 
-    # =====================================================
+    # --------------------------------------------------------
     # ERROR RESULT
-    # =====================================================
+    # --------------------------------------------------------
 
     if result.startswith("⚠️"):
 
         st.error(result)
 
 
-    # =====================================================
+    # --------------------------------------------------------
     # SUCCESS RESULT
-    # =====================================================
+    # --------------------------------------------------------
 
     else:
 
-        # Extract sections
         understand = extract_section(
             result,
             "UNDERSTAND",
@@ -554,9 +571,9 @@ if st.session_state["ai_result"]:
         )
 
 
-        # =================================================
+        # ----------------------------------------------------
         # JOURNEY
-        # =================================================
+        # ----------------------------------------------------
 
         st.divider()
 
@@ -570,9 +587,9 @@ if st.session_state["ai_result"]:
         )
 
 
-        # =================================================
+        # ----------------------------------------------------
         # TABS
-        # =================================================
+        # ----------------------------------------------------
 
         tab1, tab2, tab3, tab4, tab5 = st.tabs(
             [
@@ -585,9 +602,9 @@ if st.session_state["ai_result"]:
         )
 
 
-        # =================================================
-        # UNDERSTAND TAB
-        # =================================================
+        # ====================================================
+        # UNDERSTAND
+        # ====================================================
 
         with tab1:
 
@@ -605,9 +622,9 @@ if st.session_state["ai_result"]:
             )
 
 
-        # =================================================
-        # PLAN TAB
-        # =================================================
+        # ====================================================
+        # PLAN
+        # ====================================================
 
         with tab2:
 
@@ -625,9 +642,9 @@ if st.session_state["ai_result"]:
             )
 
 
-        # =================================================
-        # BUILD TAB
-        # =================================================
+        # ====================================================
+        # BUILD
+        # ====================================================
 
         with tab3:
 
@@ -645,9 +662,9 @@ if st.session_state["ai_result"]:
             )
 
 
-        # =================================================
-        # EXPLAIN TAB
-        # =================================================
+        # ====================================================
+        # EXPLAIN
+        # ====================================================
 
         with tab4:
 
@@ -665,9 +682,9 @@ if st.session_state["ai_result"]:
             )
 
 
-        # =================================================
-        # LEARN TAB
-        # =================================================
+        # ====================================================
+        # LEARN
+        # ====================================================
 
         with tab5:
 
@@ -686,9 +703,9 @@ if st.session_state["ai_result"]:
             )
 
 
-# =========================================================
+# ============================================================
 # FOOTER
-# =========================================================
+# ============================================================
 
 st.divider()
 
