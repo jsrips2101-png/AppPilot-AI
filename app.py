@@ -1,8 +1,7 @@
 import os
 import time
 import streamlit as st
-from google import genai
-from google.genai import types
+from groq import Groq
 
 
 # ============================================================
@@ -17,40 +16,40 @@ st.set_page_config(
 
 
 # ============================================================
-# GEMINI API CONFIGURATION
+# GROQ API CONFIGURATION
 # ============================================================
 
-API_KEY = st.secrets.get("GEMINI_API_KEY")
+API_KEY = st.secrets.get("GROQ_API_KEY")
 
 if not API_KEY:
-    API_KEY = os.getenv("GEMINI_API_KEY")
+    API_KEY = os.getenv("GROQ_API_KEY")
 
 
 if not API_KEY:
     st.error(
-        "❌ Gemini API key is missing.\n\n"
-        "Please add GEMINI_API_KEY in Streamlit Secrets."
+        "❌ Groq API key is missing.\n\n"
+        "Please add GROQ_API_KEY in Streamlit Secrets."
     )
     st.stop()
 
 
-client = genai.Client(api_key=API_KEY)
-
-
-MODEL = st.secrets.get(
-    "GEMINI_MODEL",
-    "gemini-3.8-flash"
+client = Groq(
+    api_key=API_KEY
 )
-
-FALLBACK_MODELS = [
-    "gemini-3.8-flash",
-    "gemini-3.7-flash",
-    "gemini-3.6-flash"
-]
 
 
 # ============================================================
-# GEMINI AI FUNCTION WITH AUTOMATIC RETRY
+# GROQ MODEL
+# ============================================================
+
+MODEL = st.secrets.get(
+    "GROQ_MODEL",
+    "openai/gpt-oss-120b"
+)
+
+
+# ============================================================
+# AI GENERATION FUNCTION
 # ============================================================
 
 def generate_app_analysis(app_idea):
@@ -165,146 +164,134 @@ IMPORTANT:
 - Follow the five section headings exactly.
 """
 
-    # Maximum number of Gemini attempts
     max_retries = 3
 
     for attempt in range(max_retries):
 
         try:
 
-            # ------------------------------------------------
-            # First attempt
-            # ------------------------------------------------
-
             if attempt == 0:
-
                 message = (
                     "🤖 AppPilot AI is analyzing "
                     "your app idea..."
                 )
-
-            # ------------------------------------------------
-            # Retry attempts
-            # ------------------------------------------------
-
             else:
-
                 message = (
-                    f"🔄 Gemini is temporarily busy. "
-                    f"Retrying... ({attempt + 1}/{max_retries})"
+                    f"🔄 Retrying AI request..."
+                    f" ({attempt + 1}/{max_retries})"
                 )
 
             with st.spinner(message):
 
-                response = client.models.generate_content(
+                response = client.chat.completions.create(
                     model=MODEL,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=0.7,
-                        max_output_tokens=8000
-                    )
+
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are AppPilot AI. "
+                                "You help users understand, "
+                                "plan, build, explain and learn "
+                                "application development."
+                            )
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
+
+                    temperature=0.7,
+
+                    max_tokens=8000
                 )
 
-            # ------------------------------------------------
-            # Check Gemini response
-            # ------------------------------------------------
+            if response and response.choices:
 
-            if response and response.text:
+                result = response.choices[0].message.content
 
-                return response.text
+                if result:
+
+                    return result
 
             return (
-                "⚠️ Gemini returned an empty response."
+                "⚠️ AI returned an empty response."
             )
 
         except Exception as e:
 
             error_message = str(e)
 
-            # ------------------------------------------------
-            # Temporary Gemini errors
-            # ------------------------------------------------
-
+            # Temporary server / connection problems
             temporary_error = (
                 "503" in error_message
-                or "UNAVAILABLE" in error_message
-                or "overloaded" in error_message.lower()
+                or "500" in error_message
+                or "502" in error_message
+                or "504" in error_message
+                or "timeout" in error_message.lower()
                 or "temporarily" in error_message.lower()
+                or "connection" in error_message.lower()
             )
 
             if temporary_error:
 
-                # If this is the last attempt
                 if attempt == max_retries - 1:
 
                     return (
-                        "⚠️ **Gemini is temporarily unavailable.**\n\n"
+                        "⚠️ **Groq is temporarily unavailable.**\n\n"
                         "I tried automatically several times, "
-                        "but Gemini is still experiencing "
-                        "high demand.\n\n"
-                        "Please wait a few minutes and "
-                        "try again.\n\n"
-                        f"Model used: `{MODEL}`"
+                        "but the AI service did not respond.\n\n"
+                        "Please wait a little and try again."
                     )
 
-                # Wait before next retry
-                wait_time = 3 * (attempt + 1)
+                wait_time = 2 * (attempt + 1)
 
                 time.sleep(wait_time)
 
                 continue
 
-            # ------------------------------------------------
-            # Rate limit error
-            # ------------------------------------------------
-
+            # Rate limit
             if (
                 "429" in error_message
-                or "RESOURCE_EXHAUSTED" in error_message
+                or "rate_limit" in error_message.lower()
+                or "rate limit" in error_message.lower()
             ):
 
                 return (
-                    "⚠️ **Gemini request limit reached.**\n\n"
-                    "Please wait for the request limit "
-                    "to reset and try again later."
+                    "⚠️ **Groq rate limit reached.**\n\n"
+                    "Please wait a little and try again."
                 )
 
-            # ------------------------------------------------
-            # Model not found
-            # ------------------------------------------------
-
+            # Authentication error
             if (
-                "404" in error_message
-                or "NOT_FOUND" in error_message
+                "401" in error_message
+                or "authentication" in error_message.lower()
+                or "invalid api key" in error_message.lower()
             ):
 
                 return (
-                    "⚠️ **Gemini model not found.**\n\n"
-                    f"Current model: `{MODEL}`\n\n"
-                    "Please check the GEMINI_MODEL value "
+                    "⚠️ **Groq authentication failed.**\n\n"
+                    "Please check your GROQ_API_KEY "
                     "in Streamlit Secrets."
                 )
 
-            # ------------------------------------------------
-            # Authentication error
-            # ------------------------------------------------
-
+            # Model error
             if (
-                "401" in error_message
-                or "UNAUTHENTICATED" in error_message
+                "404" in error_message
+                or "model" in error_message.lower()
             ):
 
                 return (
-                    "⚠️ **Gemini authentication failed.**\n\n"
-                    "Please check your GEMINI_API_KEY."
+                    "⚠️ **Groq model error.**\n\n"
+                    f"Current model: `{MODEL}`\n\n"
+                    "Please check your GROQ_MODEL value "
+                    "in Streamlit Secrets."
                 )
 
-            # ------------------------------------------------
-            # Other API errors
-            # ------------------------------------------------
-
+            # Other errors
             return (
-                "⚠️ **Gemini API Error**\n\n"
+                "⚠️ **Groq API Error**\n\n"
                 f"{error_message}"
             )
 
@@ -379,13 +366,12 @@ st.divider()
 
 
 # ============================================================
-# STEP 1 — APP IDEA
+# STEP 1 — ENTER APP IDEA
 # ============================================================
 
 st.markdown(
     "### 💡 Step 1 — Enter Your App Idea"
 )
-
 
 app_idea = st.text_area(
     "What app do you want to build?",
@@ -407,14 +393,10 @@ st.markdown(
     "#### Try an example"
 )
 
-
 col1, col2, col3 = st.columns(3)
 
 
-# ------------------------------------------------------------
 # Expense Tracker
-# ------------------------------------------------------------
-
 with col1:
 
     if st.button(
@@ -431,10 +413,7 @@ with col1:
         st.rerun()
 
 
-# ------------------------------------------------------------
 # Study Planner
-# ------------------------------------------------------------
-
 with col2:
 
     if st.button(
@@ -451,10 +430,7 @@ with col2:
         st.rerun()
 
 
-# ------------------------------------------------------------
 # Fitness App
-# ------------------------------------------------------------
-
 with col3:
 
     if st.button(
@@ -484,7 +460,7 @@ if (
 
 
 # ============================================================
-# START BUILDING BUTTON
+# START BUILDING
 # ============================================================
 
 if st.button(
@@ -524,7 +500,7 @@ if st.button(
 
 
 # ============================================================
-# DISPLAY AI RESULT
+# DISPLAY RESULT
 # ============================================================
 
 if st.session_state["ai_result"]:
@@ -532,18 +508,18 @@ if st.session_state["ai_result"]:
     result = st.session_state["ai_result"]
 
 
-    # --------------------------------------------------------
-    # ERROR RESULT
-    # --------------------------------------------------------
+    # ========================================================
+    # ERROR
+    # ========================================================
 
     if result.startswith("⚠️"):
 
         st.error(result)
 
 
-    # --------------------------------------------------------
-    # SUCCESS RESULT
-    # --------------------------------------------------------
+    # ========================================================
+    # SUCCESS
+    # ========================================================
 
     else:
 
@@ -577,9 +553,9 @@ if st.session_state["ai_result"]:
         )
 
 
-        # ----------------------------------------------------
-        # JOURNEY
-        # ----------------------------------------------------
+        # ====================================================
+        # DEVELOPMENT JOURNEY
+        # ====================================================
 
         st.divider()
 
@@ -593,9 +569,9 @@ if st.session_state["ai_result"]:
         )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # TABS
-        # ----------------------------------------------------
+        # ====================================================
 
         tab1, tab2, tab3, tab4, tab5 = st.tabs(
             [
@@ -609,7 +585,7 @@ if st.session_state["ai_result"]:
 
 
         # ====================================================
-        # UNDERSTAND
+        # UNDERSTAND TAB
         # ====================================================
 
         with tab1:
@@ -629,7 +605,7 @@ if st.session_state["ai_result"]:
 
 
         # ====================================================
-        # PLAN
+        # PLAN TAB
         # ====================================================
 
         with tab2:
@@ -649,7 +625,7 @@ if st.session_state["ai_result"]:
 
 
         # ====================================================
-        # BUILD
+        # BUILD TAB
         # ====================================================
 
         with tab3:
@@ -669,7 +645,7 @@ if st.session_state["ai_result"]:
 
 
         # ====================================================
-        # EXPLAIN
+        # EXPLAIN TAB
         # ====================================================
 
         with tab4:
@@ -689,7 +665,7 @@ if st.session_state["ai_result"]:
 
 
         # ====================================================
-        # LEARN
+        # LEARN TAB
         # ====================================================
 
         with tab5:
