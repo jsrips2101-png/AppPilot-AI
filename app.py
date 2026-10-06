@@ -33,7 +33,26 @@ if not API_KEY:
 
 # Create Gemini client
 client = genai.Client(api_key=API_KEY)
+# =========================================================
+# CHECK AVAILABLE GEMINI MODELS
+# =========================================================
 
+try:
+    available_models = []
+
+    for model in client.models.list():
+        if "generateContent" in str(model.supported_actions):
+            available_models.append(model.name)
+
+    st.sidebar.markdown("### 🔎 Available Gemini Models")
+
+    for model_name in available_models:
+        st.sidebar.write(model_name)
+
+except Exception as e:
+    st.sidebar.error(
+        f"Could not check available models: {str(e)}"
+    )
 
 # Gemini model
 MODEL = st.secrets.get(
